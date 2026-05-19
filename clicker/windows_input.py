@@ -11,13 +11,19 @@ IS_WINDOWS = platform.system() == "Windows"
 
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
+MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
+MAPVK_VK_TO_VSC = 0
 SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
@@ -87,6 +93,24 @@ BUTTON_FLAGS = {
     "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
     "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
     "middle": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+}
+
+EXTENDED_KEY_VKS = {
+    0x21,
+    0x22,
+    0x23,
+    0x24,
+    0x25,
+    0x26,
+    0x27,
+    0x28,
+    0x2D,
+    0x2E,
+    0x5B,
+    0x5C,
+    0x6F,
+    0x90,
+    0x91,
 }
 
 KEY_ALIASES = {
@@ -170,10 +194,10 @@ def _user32() -> ctypes.WinDLL:
         _USER32.GetCursorPos.restype = wintypes.BOOL
         _USER32.GetSystemMetrics.argtypes = [wintypes.INT]
         _USER32.GetSystemMetrics.restype = wintypes.INT
+        _USER32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+        _USER32.MapVirtualKeyW.restype = wintypes.UINT
         _USER32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
         _USER32.SendInput.restype = wintypes.UINT
-        _USER32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
-        _USER32.SetCursorPos.restype = wintypes.BOOL
     return _USER32
 
 
@@ -218,6 +242,15 @@ def validate_screen_point(x: int, y: int, bounds: ScreenBounds) -> None:
         f"目标坐标 ({x}, {y}) 不在当前屏幕范围内。当前屏幕范围：{bounds.describe()}。"
         "请重新捕获目标点，或检查显示器连接、分辨率和缩放设置。"
     )
+
+
+def absolute_mouse_coordinates(x: int, y: int, bounds: ScreenBounds) -> tuple[int, int]:
+    validate_screen_point(x, y, bounds)
+    width = max(1, bounds.width - 1)
+    height = max(1, bounds.height - 1)
+    absolute_x = round((x - bounds.left) * 65535 / width)
+    absolute_y = round((y - bounds.top) * 65535 / height)
+    return absolute_x, absolute_y
 
 
 def is_f7_pressed() -> bool:
@@ -267,22 +300,21 @@ class WindowsClickBackend:
 
         x = int(x)
         y = int(y)
-        validate_screen_point(x, y, virtual_screen_bounds())
+        absolute_x, absolute_y = absolute_mouse_coordinates(x, y, virtual_screen_bounds())
 
-        user32 = _user32()
-        ctypes.set_last_error(0)
-        if not user32.SetCursorPos(x, y):
-            raise OSError(
-                _last_windows_error(f"移动鼠标到 ({x}, {y})")
-                + " 如果目标程序以管理员身份运行，请也用管理员身份启动自动点击器；"
-                "如果刚切换过显示器或缩放，请重新捕获目标点。"
-            )
+        move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+        self._send_mouse_input(MOUSEINPUT(absolute_x, absolute_y, 0, move_flags, 0, ULONG_PTR(0)), "移动鼠标")
         if self.settle_seconds:
             time.sleep(self.settle_seconds)
 
         down_flag, up_flag = BUTTON_FLAGS[button]
-        self._send_mouse_flag(down_flag)
-        self._send_mouse_flag(up_flag)
+        self._send_input_events(
+            [
+                INPUT(type=INPUT_MOUSE, union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, down_flag, 0, ULONG_PTR(0)))),
+                INPUT(type=INPUT_MOUSE, union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, up_flag, 0, ULONG_PTR(0)))),
+            ],
+            "发送鼠标点击",
+        )
 
     def press_keys(self, keys: str) -> None:
         key_codes = parse_key_combination(keys)
@@ -293,30 +325,34 @@ class WindowsClickBackend:
             modifiers = modifiers[:-1]
 
         for key_code in modifiers:
-            self._send_key(key_code, key_up=False)
+            self._send_key_scan_code(key_code, key_up=False)
         for key_code in regular_keys:
-            self._send_key(key_code, key_up=False)
-            self._send_key(key_code, key_up=True)
+            self._send_key_scan_code(key_code, key_up=False)
+            self._send_key_scan_code(key_code, key_up=True)
         for key_code in reversed(modifiers):
-            self._send_key(key_code, key_up=True)
+            self._send_key_scan_code(key_code, key_up=True)
 
-    def _send_mouse_flag(self, flag: int) -> None:
-        user32 = _user32()
-        event = INPUT(
-            type=INPUT_MOUSE,
-            union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, flag, 0, ULONG_PTR(0))),
-        )
-        sent = user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
-        if sent != 1:
-            raise OSError(_last_windows_error("发送鼠标点击"))
+    def _send_mouse_input(self, mouse_input: MOUSEINPUT, action: str) -> None:
+        self._send_input_events([INPUT(type=INPUT_MOUSE, union=INPUT_UNION(mi=mouse_input))], action)
 
-    def _send_key(self, key_code: int, key_up: bool) -> None:
+    def _send_key_scan_code(self, key_code: int, key_up: bool) -> None:
         user32 = _user32()
-        flags = KEYEVENTF_KEYUP if key_up else 0
+        scan_code = user32.MapVirtualKeyW(key_code, MAPVK_VK_TO_VSC)
+        flags = KEYEVENTF_SCANCODE
+        if key_code in EXTENDED_KEY_VKS:
+            flags |= KEYEVENTF_EXTENDEDKEY
+        if key_up:
+            flags |= KEYEVENTF_KEYUP
         event = INPUT(
             type=INPUT_KEYBOARD,
-            union=INPUT_UNION(ki=KEYBDINPUT(key_code, 0, flags, 0, ULONG_PTR(0))),
+            union=INPUT_UNION(ki=KEYBDINPUT(0, scan_code, flags, 0, ULONG_PTR(0))),
         )
-        sent = user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
-        if sent != 1:
-            raise OSError(_last_windows_error("发送键盘按键"))
+        self._send_input_events([event], "发送键盘按键")
+
+    def _send_input_events(self, events: list[INPUT], action: str) -> None:
+        user32 = _user32()
+        input_array = (INPUT * len(events))(*events)
+        ctypes.set_last_error(0)
+        sent = user32.SendInput(len(events), input_array, ctypes.sizeof(INPUT))
+        if sent != len(events):
+            raise OSError(_last_windows_error(action))

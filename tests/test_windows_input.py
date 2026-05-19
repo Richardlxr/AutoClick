@@ -1,6 +1,12 @@
 import unittest
 
-from clicker.windows_input import ScreenBounds, parse_key_combination, validate_screen_point, virtual_key_for_name
+from clicker.windows_input import (
+    ScreenBounds,
+    absolute_mouse_coordinates,
+    parse_key_combination,
+    validate_screen_point,
+    virtual_key_for_name,
+)
 
 
 class WindowsInputTests(unittest.TestCase):
@@ -34,6 +40,18 @@ class WindowsInputTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "目标坐标"):
             validate_screen_point(1920, 100, bounds)
+
+    def test_absolute_mouse_coordinates_normalize_virtual_screen_points(self) -> None:
+        bounds = ScreenBounds(left=0, top=0, width=1920, height=1080)
+
+        self.assertEqual(absolute_mouse_coordinates(0, 0, bounds), (0, 0))
+        self.assertEqual(absolute_mouse_coordinates(1919, 1079, bounds), (65535, 65535))
+
+    def test_absolute_mouse_coordinates_support_negative_virtual_screen_origin(self) -> None:
+        bounds = ScreenBounds(left=-1920, top=0, width=3840, height=1080)
+
+        self.assertEqual(absolute_mouse_coordinates(-1920, 0, bounds), (0, 0))
+        self.assertEqual(absolute_mouse_coordinates(1919, 1079, bounds), (65535, 65535))
 
 
 if __name__ == "__main__":

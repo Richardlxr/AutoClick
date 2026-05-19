@@ -49,6 +49,19 @@ python app.py
 
 ## 常见问题
 
+### 游戏里点击或按键没有反应
+
+自动点击器使用 Windows `SendInput` 发送普通系统输入。它适合桌面软件、浏览器、窗口化工具，以及允许系统输入的游戏窗口。
+
+如果游戏使用 Raw Input、DirectInput、管理员权限、独占全屏或反作弊保护，可能会忽略这类注入输入。可以尝试：
+
+1. 把游戏切到窗口化或无边框窗口模式。
+2. 先手动点一下游戏窗口，让它成为前台焦点。
+3. 如果游戏以管理员身份运行，也用管理员身份运行自动点击器。
+4. 重新捕获目标点，确保点位没有被缩放或显示器布局影响。
+
+如果游戏或反作弊明确拦截自动化输入，本工具不会尝试绕过。
+
 ### 运行时提示“移动鼠标失败”或 `SetCursorPos failed`
 
 这通常表示 Windows 拒绝把鼠标移动到目标坐标，常见原因：
@@ -111,8 +124,8 @@ ClickMacro-windows.zip
 发布 Release 时，可以推送一个版本 tag：
 
 ```bash
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 GitHub Actions 会自动构建 `ClickMacro.exe`，并把 `ClickMacro-windows.zip` 附到对应 Release 上。
