@@ -13,6 +13,9 @@ class ClickBackend(Protocol):
     def click(self, x: int, y: int, button: str = "left") -> None:
         ...
 
+    def press_keys(self, keys: str) -> None:
+        ...
+
 
 EventCallback = Callable[[dict[str, Any]], None]
 StopPredicate = Callable[[], bool]
@@ -21,9 +24,13 @@ StopPredicate = Callable[[], bool]
 @dataclass
 class DryRunClickBackend:
     clicks: list[tuple[int, int, str]] = field(default_factory=list)
+    key_presses: list[str] = field(default_factory=list)
 
     def click(self, x: int, y: int, button: str = "left") -> None:
         self.clicks.append((x, y, button))
+
+    def press_keys(self, keys: str) -> None:
+        self.key_presses.append(keys)
 
 
 class MacroRunner:
@@ -106,37 +113,55 @@ class MacroRunner:
                     if self._should_stop():
                         break
 
-                    target = point_map[step.target_id]
+                    target = point_map.get(step.target_id)
+                    summary = target.name if target else step.keys
                     self._emit(
                         {
                             "type": "step_started",
+                            "action": step.action,
                             "loop": completed_loops,
                             "step_index": step_index,
-                            "target": target.name,
-                            "x": target.x,
-                            "y": target.y,
+                            "summary": summary,
+                            "target": target.name if target else "",
+                            "x": target.x if target else None,
+                            "y": target.y if target else None,
+                            "keys": step.keys,
                         }
                     )
 
                     if not self._wait_ms(step.delay_ms):
                         break
 
-                    for click_index in range(1, step.clicks + 1):
+                    for repeat_index in range(1, step.clicks + 1):
                         if self._should_stop():
                             break
-                        self.backend.click(target.x, target.y, step.button)
-                        self._emit(
-                            {
-                                "type": "clicked",
-                                "loop": completed_loops,
-                                "step_index": step_index,
-                                "click_index": click_index,
-                                "target": target.name,
-                                "x": target.x,
-                                "y": target.y,
-                            }
-                        )
-                        if click_index < step.clicks and not self._wait_ms(step.interval_ms):
+                        if step.action == "click":
+                            if target is None:
+                                raise RuntimeError("Click step target is missing.")
+                            self.backend.click(target.x, target.y, step.button)
+                            self._emit(
+                                {
+                                    "type": "clicked",
+                                    "loop": completed_loops,
+                                    "step_index": step_index,
+                                    "repeat_index": repeat_index,
+                                    "target": target.name,
+                                    "x": target.x,
+                                    "y": target.y,
+                                }
+                            )
+                        else:
+                            self.backend.press_keys(step.keys)
+                            self._emit(
+                                {
+                                    "type": "key_pressed",
+                                    "loop": completed_loops,
+                                    "step_index": step_index,
+                                    "repeat_index": repeat_index,
+                                    "keys": step.keys,
+                                }
+                            )
+                        if repeat_index < step.clicks and not self._wait_ms(step.interval_ms):
                             break
 
             final_type = "stopped" if self._stop_event.is_set() else "finished"

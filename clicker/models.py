@@ -31,17 +31,21 @@ class TargetPoint:
 
 @dataclass(slots=True)
 class MacroStep:
-    target_id: str
+    target_id: str = ""
     delay_ms: int = 0
     clicks: int = 1
     interval_ms: int = 80
     button: str = "left"
+    action: str = "click"
+    keys: str = ""
     id: str = field(default_factory=new_id)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "action": self.action,
             "target_id": self.target_id,
+            "keys": self.keys,
             "delay_ms": self.delay_ms,
             "clicks": self.clicks,
             "interval_ms": self.interval_ms,
@@ -52,7 +56,9 @@ class MacroStep:
     def from_dict(cls, data: dict[str, Any]) -> "MacroStep":
         return cls(
             id=str(data.get("id") or new_id()),
+            action=str(data.get("action") or "click"),
             target_id=str(data.get("target_id") or ""),
+            keys=str(data.get("keys") or ""),
             delay_ms=int(data.get("delay_ms", 0)),
             clicks=int(data.get("clicks", 1)),
             interval_ms=int(data.get("interval_ms", 80)),
@@ -71,36 +77,42 @@ class Macro:
     def validate(self) -> list[str]:
         errors: list[str] = []
         point_ids = {point.id for point in self.points}
+        has_click_step = any(step.action == "click" for step in self.steps)
 
-        if not self.points:
-            errors.append("Add at least one target point.")
+        if has_click_step and not self.points:
+            errors.append("请至少添加一个目标点。")
         if not self.steps:
-            errors.append("Add at least one macro step.")
+            errors.append("请至少添加一个宏步骤。")
 
         seen_point_ids: set[str] = set()
         for point in self.points:
             if point.id in seen_point_ids:
-                errors.append(f"Duplicate point id: {point.id}")
+                errors.append(f"目标点 ID 重复：{point.id}")
             seen_point_ids.add(point.id)
 
         for index, step in enumerate(self.steps, start=1):
-            prefix = f"Step {index}"
-            if step.target_id not in point_ids:
-                errors.append(f"{prefix} references a missing target point.")
+            prefix = f"第 {index} 步"
+            if step.action not in {"click", "key"}:
+                errors.append(f"{prefix}的操作类型不支持。")
             if step.delay_ms < 0:
-                errors.append(f"{prefix} delay must be 0 or greater.")
+                errors.append(f"{prefix}的等待时间必须大于等于 0。")
             if step.clicks < 1:
-                errors.append(f"{prefix} click count must be at least 1.")
+                errors.append(f"{prefix}的执行次数至少为 1。")
             if step.interval_ms < 0:
-                errors.append(f"{prefix} interval must be 0 or greater.")
-            if step.button not in {"left", "right", "middle"}:
-                errors.append(f"{prefix} has an unsupported mouse button.")
+                errors.append(f"{prefix}的间隔时间必须大于等于 0。")
+            if step.action == "click":
+                if step.target_id not in point_ids:
+                    errors.append(f"{prefix}引用了不存在的目标点。")
+                if step.button not in {"left", "right", "middle"}:
+                    errors.append(f"{prefix}的鼠标按键不支持。")
+            if step.action == "key" and not step.keys.strip():
+                errors.append(f"{prefix}缺少键盘按键。")
 
         return errors
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "version": 1,
+            "version": 2,
             "points": [point.to_dict() for point in self.points],
             "steps": [step.to_dict() for step in self.steps],
         }

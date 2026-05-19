@@ -36,6 +36,25 @@ class MacroRunnerTests(unittest.TestCase):
         )
         self.assertIn("finished", events)
 
+    def test_runner_supports_keyboard_steps(self) -> None:
+        backend = DryRunClickBackend()
+        events: list[str] = []
+        macro = Macro(
+            points=[TargetPoint(name="A", x=10, y=20, id="a")],
+            steps=[
+                MacroStep(action="key", keys="Ctrl+C", clicks=2, interval_ms=0),
+                MacroStep(action="click", target_id="a", clicks=1, interval_ms=0),
+            ],
+        )
+        runner = MacroRunner(backend=backend, on_event=lambda event: events.append(event["type"]))
+
+        runner.start(macro, loop_count=1)
+        runner.wait(timeout=2)
+
+        self.assertEqual(backend.key_presses, ["Ctrl+C", "Ctrl+C"])
+        self.assertEqual(backend.clicks, [(10, 20, "left")])
+        self.assertIn("key_pressed", events)
+
     def test_runner_rejects_invalid_macro(self) -> None:
         runner = MacroRunner(backend=DryRunClickBackend())
         macro = Macro(points=[], steps=[])
