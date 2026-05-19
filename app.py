@@ -10,6 +10,10 @@ from clicker.models import Macro, MacroStep, TargetPoint
 from clicker.runner import DryRunClickBackend, MacroRunner
 from clicker.windows_input import (
     IS_WINDOWS,
+    KEYBOARD_MODE_SCAN_CODE,
+    KEYBOARD_MODE_VIRTUAL_KEY,
+    MOUSE_MODE_ABSOLUTE,
+    MOUSE_MODE_CURSOR,
     WindowsClickBackend,
     is_f7_pressed,
     make_process_dpi_aware,
@@ -21,6 +25,14 @@ ACTION_CLICK_LABEL = "点击坐标"
 ACTION_KEY_LABEL = "键盘按键"
 ACTION_LABEL_TO_VALUE = {ACTION_CLICK_LABEL: "click", ACTION_KEY_LABEL: "key"}
 ACTION_VALUE_TO_LABEL = {"click": ACTION_CLICK_LABEL, "key": ACTION_KEY_LABEL}
+MOUSE_MODE_LABELS = {
+    "光标移动（旧版，优先尝试）": MOUSE_MODE_CURSOR,
+    "绝对移动（新版）": MOUSE_MODE_ABSOLUTE,
+}
+KEYBOARD_MODE_LABELS = {
+    "虚拟键（旧版，优先尝试）": KEYBOARD_MODE_VIRTUAL_KEY,
+    "扫描码（游戏可试）": KEYBOARD_MODE_SCAN_CODE,
+}
 
 COMMON_KEYS = [
     "Enter",
@@ -92,6 +104,8 @@ class ClickMacroApp(tk.Tk):
         self.step_repeats_var = tk.StringVar(value="1")
         self.step_interval_var = tk.StringVar(value="80")
         self.loop_count_var = tk.StringVar(value="1")
+        self.mouse_mode_var = tk.StringVar(value="光标移动（旧版，优先尝试）")
+        self.keyboard_mode_var = tk.StringVar(value="虚拟键（旧版，优先尝试）")
         self.status_var = tk.StringVar(value="")
 
     def _configure_style(self) -> None:
@@ -320,25 +334,41 @@ class ClickMacroApp(tk.Tk):
     def _build_run_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="运行控制", padding=12, style="Card.TLabelframe")
         frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(16, 0))
-        for column in range(7):
+        for column in range(8):
             frame.columnconfigure(column, weight=1)
 
         ttk.Label(frame, text="循环次数（0 为无限）").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame, text="鼠标模式").grid(row=0, column=1, sticky="w")
+        ttk.Label(frame, text="键盘模式").grid(row=0, column=2, sticky="w")
         ttk.Entry(frame, textvariable=self.loop_count_var, width=10).grid(row=1, column=0, sticky="ew", padx=(0, 10))
+        ttk.Combobox(
+            frame,
+            textvariable=self.mouse_mode_var,
+            state="readonly",
+            values=list(MOUSE_MODE_LABELS),
+            width=18,
+        ).grid(row=1, column=1, sticky="ew", padx=(0, 10))
+        ttk.Combobox(
+            frame,
+            textvariable=self.keyboard_mode_var,
+            state="readonly",
+            values=list(KEYBOARD_MODE_LABELS),
+            width=18,
+        ).grid(row=1, column=2, sticky="ew", padx=(0, 10))
         ttk.Button(frame, text="开始 F5", command=self.start_macro, style="Accent.TButton").grid(
-            row=1, column=1, sticky="ew", padx=(0, 10)
-        )
-        ttk.Button(frame, text="暂停 / 继续 F6", command=self.toggle_pause).grid(
-            row=1, column=2, sticky="ew", padx=(0, 10)
-        )
-        ttk.Button(frame, text="停止 F7", command=self.stop_macro, style="Danger.TButton").grid(
             row=1, column=3, sticky="ew", padx=(0, 10)
         )
-        ttk.Button(frame, text="保存宏", command=self.save_macro).grid(row=1, column=4, sticky="ew", padx=(0, 10))
-        ttk.Button(frame, text="打开宏", command=self.open_macro).grid(row=1, column=5, sticky="ew")
+        ttk.Button(frame, text="暂停 / 继续 F6", command=self.toggle_pause).grid(
+            row=1, column=4, sticky="ew", padx=(0, 10)
+        )
+        ttk.Button(frame, text="停止 F7", command=self.stop_macro, style="Danger.TButton").grid(
+            row=1, column=5, sticky="ew", padx=(0, 10)
+        )
+        ttk.Button(frame, text="保存宏", command=self.save_macro).grid(row=1, column=6, sticky="ew", padx=(0, 10))
+        ttk.Button(frame, text="打开宏", command=self.open_macro).grid(row=1, column=7, sticky="ew")
 
         status = ttk.Label(frame, textvariable=self.status_var, anchor="w", style="Status.TLabel")
-        status.grid(row=2, column=0, columnspan=7, sticky="ew", pady=(12, 0))
+        status.grid(row=2, column=0, columnspan=8, sticky="ew", pady=(12, 0))
 
     def add_point(self) -> None:
         payload = self._point_form_payload()
@@ -492,9 +522,18 @@ class ClickMacroApp(tk.Tk):
             return
         try:
             loop_count = int(self.loop_count_var.get())
+            self._configure_input_modes()
             self.runner.start(self.macro, loop_count=loop_count)
         except Exception as error:
             messagebox.showerror("无法开始", str(error))
+
+    def _configure_input_modes(self) -> None:
+        backend = self.runner.backend
+        if not hasattr(backend, "configure_modes"):
+            return
+        mouse_mode = MOUSE_MODE_LABELS.get(self.mouse_mode_var.get(), MOUSE_MODE_CURSOR)
+        keyboard_mode = KEYBOARD_MODE_LABELS.get(self.keyboard_mode_var.get(), KEYBOARD_MODE_VIRTUAL_KEY)
+        backend.configure_modes(mouse_mode=mouse_mode, keyboard_mode=keyboard_mode)
 
     def toggle_pause(self) -> None:
         if not self.runner.is_running:

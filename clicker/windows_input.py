@@ -30,6 +30,13 @@ SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
 VK_F7 = 0x76
 
+MOUSE_MODE_CURSOR = "cursor"
+MOUSE_MODE_ABSOLUTE = "absolute"
+KEYBOARD_MODE_VIRTUAL_KEY = "virtual_key"
+KEYBOARD_MODE_SCAN_CODE = "scan_code"
+SUPPORTED_MOUSE_MODES = {MOUSE_MODE_CURSOR, MOUSE_MODE_ABSOLUTE}
+SUPPORTED_KEYBOARD_MODES = {KEYBOARD_MODE_VIRTUAL_KEY, KEYBOARD_MODE_SCAN_CODE}
+
 ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
 _USER32 = None
 
@@ -198,6 +205,8 @@ def _user32() -> ctypes.WinDLL:
         _USER32.MapVirtualKeyW.restype = wintypes.UINT
         _USER32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
         _USER32.SendInput.restype = wintypes.UINT
+        _USER32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
+        _USER32.SetCursorPos.restype = wintypes.BOOL
     return _USER32
 
 
@@ -288,11 +297,30 @@ def virtual_key_for_name(name: str) -> int:
 
 
 class WindowsClickBackend:
-    def __init__(self, settle_seconds: float = 0.02) -> None:
+    def __init__(
+        self,
+        settle_seconds: float = 0.02,
+        mouse_mode: str = MOUSE_MODE_CURSOR,
+        keyboard_mode: str = KEYBOARD_MODE_VIRTUAL_KEY,
+    ) -> None:
         if not IS_WINDOWS:
             raise RuntimeError("WindowsClickBackend can only run on Windows.")
         make_process_dpi_aware()
         self.settle_seconds = settle_seconds
+        self.mouse_mode = mouse_mode
+        self.keyboard_mode = keyboard_mode
+        self._validate_modes()
+
+    def configure_modes(self, mouse_mode: str, keyboard_mode: str) -> None:
+        self.mouse_mode = mouse_mode
+        self.keyboard_mode = keyboard_mode
+        self._validate_modes()
+
+    def _validate_modes(self) -> None:
+        if self.mouse_mode not in SUPPORTED_MOUSE_MODES:
+            raise ValueError(f"Unsupported mouse mode: {self.mouse_mode}")
+        if self.keyboard_mode not in SUPPORTED_KEYBOARD_MODES:
+            raise ValueError(f"Unsupported keyboard mode: {self.keyboard_mode}")
 
     def click(self, x: int, y: int, button: str = "left") -> None:
         if button not in BUTTON_FLAGS:
@@ -300,10 +328,10 @@ class WindowsClickBackend:
 
         x = int(x)
         y = int(y)
-        absolute_x, absolute_y = absolute_mouse_coordinates(x, y, virtual_screen_bounds())
-
-        move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-        self._send_mouse_input(MOUSEINPUT(absolute_x, absolute_y, 0, move_flags, 0, ULONG_PTR(0)), "移动鼠标")
+        if self.mouse_mode == MOUSE_MODE_ABSOLUTE:
+            self._move_mouse_absolute(x, y)
+        else:
+            self._move_mouse_cursor(x, y)
         if self.settle_seconds:
             time.sleep(self.settle_seconds)
 
@@ -325,15 +353,45 @@ class WindowsClickBackend:
             modifiers = modifiers[:-1]
 
         for key_code in modifiers:
-            self._send_key_scan_code(key_code, key_up=False)
+            self._send_key(key_code, key_up=False)
         for key_code in regular_keys:
-            self._send_key_scan_code(key_code, key_up=False)
-            self._send_key_scan_code(key_code, key_up=True)
+            self._send_key(key_code, key_up=False)
+            self._send_key(key_code, key_up=True)
         for key_code in reversed(modifiers):
-            self._send_key_scan_code(key_code, key_up=True)
+            self._send_key(key_code, key_up=True)
+
+    def _move_mouse_absolute(self, x: int, y: int) -> None:
+        absolute_x, absolute_y = absolute_mouse_coordinates(x, y, virtual_screen_bounds())
+        move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+        self._send_mouse_input(MOUSEINPUT(absolute_x, absolute_y, 0, move_flags, 0, ULONG_PTR(0)), "移动鼠标")
+
+    def _move_mouse_cursor(self, x: int, y: int) -> None:
+        validate_screen_point(x, y, virtual_screen_bounds())
+        user32 = _user32()
+        ctypes.set_last_error(0)
+        if not user32.SetCursorPos(x, y):
+            raise OSError(
+                _last_windows_error(f"移动鼠标到 ({x}, {y})")
+                + " 如果目标程序以管理员身份运行，请也用管理员身份启动自动点击器；"
+                "如果刚切换过显示器或缩放，请重新捕获目标点。"
+            )
+
+    def _send_key(self, key_code: int, key_up: bool) -> None:
+        if self.keyboard_mode == KEYBOARD_MODE_SCAN_CODE:
+            self._send_key_scan_code(key_code, key_up)
+        else:
+            self._send_key_virtual_key(key_code, key_up)
 
     def _send_mouse_input(self, mouse_input: MOUSEINPUT, action: str) -> None:
         self._send_input_events([INPUT(type=INPUT_MOUSE, union=INPUT_UNION(mi=mouse_input))], action)
+
+    def _send_key_virtual_key(self, key_code: int, key_up: bool) -> None:
+        flags = KEYEVENTF_KEYUP if key_up else 0
+        event = INPUT(
+            type=INPUT_KEYBOARD,
+            union=INPUT_UNION(ki=KEYBDINPUT(key_code, 0, flags, 0, ULONG_PTR(0))),
+        )
+        self._send_input_events([event], "发送键盘按键")
 
     def _send_key_scan_code(self, key_code: int, key_up: bool) -> None:
         user32 = _user32()

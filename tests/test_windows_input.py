@@ -1,7 +1,12 @@
 import unittest
 
 from clicker.windows_input import (
+    KEYBOARD_MODE_SCAN_CODE,
+    KEYBOARD_MODE_VIRTUAL_KEY,
+    MOUSE_MODE_ABSOLUTE,
+    MOUSE_MODE_CURSOR,
     ScreenBounds,
+    WindowsClickBackend,
     absolute_mouse_coordinates,
     parse_key_combination,
     validate_screen_point,
@@ -52,6 +57,16 @@ class WindowsInputTests(unittest.TestCase):
 
         self.assertEqual(absolute_mouse_coordinates(-1920, 0, bounds), (0, 0))
         self.assertEqual(absolute_mouse_coordinates(1919, 1079, bounds), (65535, 65535))
+
+    def test_supported_input_mode_constants_are_stable(self) -> None:
+        self.assertEqual(MOUSE_MODE_CURSOR, "cursor")
+        self.assertEqual(MOUSE_MODE_ABSOLUTE, "absolute")
+        self.assertEqual(KEYBOARD_MODE_VIRTUAL_KEY, "virtual_key")
+        self.assertEqual(KEYBOARD_MODE_SCAN_CODE, "scan_code")
+
+    @unittest.skipIf(WindowsClickBackend is None, "keeps import visible for type checkers")
+    def test_backend_class_is_importable(self) -> None:
+        self.assertTrue(callable(WindowsClickBackend))
 
 
 if __name__ == "__main__":
