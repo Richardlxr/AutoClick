@@ -1,6 +1,9 @@
 import unittest
 
 from clicker.windows_input import (
+    CLICK_MODE_MOUSE_EVENT,
+    CLICK_MODE_SEPARATE,
+    CLICK_MODE_SENDINPUT,
     KEYBOARD_MODE_SCAN_CODE,
     KEYBOARD_MODE_VIRTUAL_KEY,
     MOUSE_MODE_ABSOLUTE,
@@ -63,6 +66,9 @@ class WindowsInputTests(unittest.TestCase):
         self.assertEqual(MOUSE_MODE_ABSOLUTE, "absolute")
         self.assertEqual(KEYBOARD_MODE_VIRTUAL_KEY, "virtual_key")
         self.assertEqual(KEYBOARD_MODE_SCAN_CODE, "scan_code")
+        self.assertEqual(CLICK_MODE_SENDINPUT, "sendinput")
+        self.assertEqual(CLICK_MODE_SEPARATE, "separate")
+        self.assertEqual(CLICK_MODE_MOUSE_EVENT, "mouse_event")
 
     @unittest.skipIf(WindowsClickBackend is None, "keeps import visible for type checkers")
     def test_backend_class_is_importable(self) -> None:

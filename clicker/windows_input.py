@@ -34,8 +34,12 @@ MOUSE_MODE_CURSOR = "cursor"
 MOUSE_MODE_ABSOLUTE = "absolute"
 KEYBOARD_MODE_VIRTUAL_KEY = "virtual_key"
 KEYBOARD_MODE_SCAN_CODE = "scan_code"
+CLICK_MODE_SENDINPUT = "sendinput"
+CLICK_MODE_SEPARATE = "separate"
+CLICK_MODE_MOUSE_EVENT = "mouse_event"
 SUPPORTED_MOUSE_MODES = {MOUSE_MODE_CURSOR, MOUSE_MODE_ABSOLUTE}
 SUPPORTED_KEYBOARD_MODES = {KEYBOARD_MODE_VIRTUAL_KEY, KEYBOARD_MODE_SCAN_CODE}
+SUPPORTED_CLICK_MODES = {CLICK_MODE_SENDINPUT, CLICK_MODE_SEPARATE, CLICK_MODE_MOUSE_EVENT}
 
 ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
 _USER32 = None
@@ -203,6 +207,8 @@ def _user32() -> ctypes.WinDLL:
         _USER32.GetSystemMetrics.restype = wintypes.INT
         _USER32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
         _USER32.MapVirtualKeyW.restype = wintypes.UINT
+        _USER32.mouse_event.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ULONG_PTR]
+        _USER32.mouse_event.restype = None
         _USER32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
         _USER32.SendInput.restype = wintypes.UINT
         _USER32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
@@ -302,6 +308,8 @@ class WindowsClickBackend:
         settle_seconds: float = 0.02,
         mouse_mode: str = MOUSE_MODE_CURSOR,
         keyboard_mode: str = KEYBOARD_MODE_VIRTUAL_KEY,
+        click_mode: str = CLICK_MODE_SEPARATE,
+        click_hold_ms: int = 60,
     ) -> None:
         if not IS_WINDOWS:
             raise RuntimeError("WindowsClickBackend can only run on Windows.")
@@ -309,11 +317,23 @@ class WindowsClickBackend:
         self.settle_seconds = settle_seconds
         self.mouse_mode = mouse_mode
         self.keyboard_mode = keyboard_mode
+        self.click_mode = click_mode
+        self.click_hold_ms = click_hold_ms
         self._validate_modes()
 
-    def configure_modes(self, mouse_mode: str, keyboard_mode: str) -> None:
+    def configure_modes(
+        self,
+        mouse_mode: str,
+        keyboard_mode: str,
+        click_mode: str | None = None,
+        click_hold_ms: int | None = None,
+    ) -> None:
         self.mouse_mode = mouse_mode
         self.keyboard_mode = keyboard_mode
+        if click_mode is not None:
+            self.click_mode = click_mode
+        if click_hold_ms is not None:
+            self.click_hold_ms = max(0, int(click_hold_ms))
         self._validate_modes()
 
     def _validate_modes(self) -> None:
@@ -321,6 +341,8 @@ class WindowsClickBackend:
             raise ValueError(f"Unsupported mouse mode: {self.mouse_mode}")
         if self.keyboard_mode not in SUPPORTED_KEYBOARD_MODES:
             raise ValueError(f"Unsupported keyboard mode: {self.keyboard_mode}")
+        if self.click_mode not in SUPPORTED_CLICK_MODES:
+            raise ValueError(f"Unsupported click mode: {self.click_mode}")
 
     def click(self, x: int, y: int, button: str = "left") -> None:
         if button not in BUTTON_FLAGS:
@@ -336,6 +358,18 @@ class WindowsClickBackend:
             time.sleep(self.settle_seconds)
 
         down_flag, up_flag = BUTTON_FLAGS[button]
+        self._click_button(down_flag, up_flag)
+
+    def _click_button(self, down_flag: int, up_flag: int) -> None:
+        hold_seconds = self.click_hold_ms / 1000
+        if self.click_mode == CLICK_MODE_MOUSE_EVENT:
+            self._mouse_event_click(down_flag, up_flag, hold_seconds)
+        elif self.click_mode == CLICK_MODE_SEPARATE or hold_seconds > 0:
+            self._send_separate_click(down_flag, up_flag, hold_seconds)
+        else:
+            self._send_batched_click(down_flag, up_flag)
+
+    def _send_batched_click(self, down_flag: int, up_flag: int) -> None:
         self._send_input_events(
             [
                 INPUT(type=INPUT_MOUSE, union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, down_flag, 0, ULONG_PTR(0)))),
@@ -343,6 +377,19 @@ class WindowsClickBackend:
             ],
             "发送鼠标点击",
         )
+
+    def _send_separate_click(self, down_flag: int, up_flag: int, hold_seconds: float) -> None:
+        self._send_mouse_input(MOUSEINPUT(0, 0, 0, down_flag, 0, ULONG_PTR(0)), "发送鼠标按下")
+        if hold_seconds:
+            time.sleep(hold_seconds)
+        self._send_mouse_input(MOUSEINPUT(0, 0, 0, up_flag, 0, ULONG_PTR(0)), "发送鼠标抬起")
+
+    def _mouse_event_click(self, down_flag: int, up_flag: int, hold_seconds: float) -> None:
+        user32 = _user32()
+        user32.mouse_event(down_flag, 0, 0, 0, ULONG_PTR(0))
+        if hold_seconds:
+            time.sleep(hold_seconds)
+        user32.mouse_event(up_flag, 0, 0, 0, ULONG_PTR(0))
 
     def press_keys(self, keys: str) -> None:
         key_codes = parse_key_combination(keys)

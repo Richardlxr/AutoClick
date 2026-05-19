@@ -60,6 +60,8 @@ python app.py
 3. 如果游戏以管理员身份运行，也用管理员身份运行自动点击器。
 4. 在底部运行控制里切换输入模式：
    - 鼠标模式先试 `光标移动（旧版，优先尝试）`，不行再试 `绝对移动（新版）`。
+   - 点击模式先试 `分离点击（推荐）`，并把 `按住(ms)` 设为 `60`、`120` 或 `200` 逐个测试。
+   - 如果仍无效，再试 `旧版 mouse_event`。
    - 键盘模式先试 `虚拟键（旧版，优先尝试）`，不行再试 `扫描码（游戏可试）`。
 5. 重新捕获目标点，确保点位没有被缩放或显示器布局影响。
 
@@ -127,8 +129,8 @@ ClickMacro-windows.zip
 发布 Release 时，可以推送一个版本 tag：
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.2.5
+git push origin v0.2.5
 ```
 
 GitHub Actions 会自动构建 `ClickMacro.exe`，并把 `ClickMacro-windows.zip` 附到对应 Release 上。
