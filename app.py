@@ -203,7 +203,7 @@ class ClickMacroApp(tk.Tk):
 
         form = ttk.Frame(frame, style="Card.TFrame")
         form.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        for column in range(6):
+        for column in range(5):
             form.columnconfigure(column, weight=1)
 
         ttk.Label(form, text="名称").grid(row=0, column=0, sticky="w")
@@ -213,14 +213,24 @@ class ClickMacroApp(tk.Tk):
         ttk.Label(form, text="Y").grid(row=0, column=2, sticky="w")
         ttk.Entry(form, textvariable=self.point_y_var, width=8).grid(row=1, column=2, sticky="ew", padx=(0, 8))
 
-        ttk.Button(form, text="保存点位", command=self.add_or_update_point, style="Accent.TButton").grid(
+        ttk.Button(form, text="新增点位", command=self.add_point, style="Accent.TButton").grid(
             row=1, column=3, sticky="ew", padx=(0, 8)
         )
-        ttk.Button(form, text="3 秒捕获", command=self.capture_point_later).grid(
-            row=1, column=4, sticky="ew", padx=(0, 8)
+        ttk.Button(form, text="更新选中", command=self.update_selected_point).grid(row=1, column=4, sticky="ew")
+
+        actions = ttk.Frame(frame, style="Card.TFrame")
+        actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        for column in range(3):
+            actions.columnconfigure(column, weight=1)
+
+        ttk.Button(actions, text="3 秒捕获新增", command=self.capture_point_later).grid(
+            row=0, column=0, sticky="ew", padx=(0, 8)
         )
-        ttk.Button(form, text="删除", command=self.delete_point, style="Danger.TButton").grid(
-            row=1, column=5, sticky="ew"
+        ttk.Button(actions, text="取消选择", command=self.clear_point_selection).grid(
+            row=0, column=1, sticky="ew", padx=(0, 8)
+        )
+        ttk.Button(actions, text="删除选中", command=self.delete_point, style="Danger.TButton").grid(
+            row=0, column=2, sticky="ew"
         )
 
     def _build_steps_panel(self, parent: ttk.Frame) -> None:
@@ -278,6 +288,7 @@ class ClickMacroApp(tk.Tk):
         ttk.Label(form, text="按键").grid(row=0, column=2, sticky="w")
         self.key_combo = ttk.Combobox(form, textvariable=self.step_key_var, values=COMMON_KEYS, width=14)
         self.key_combo.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        self.key_combo.bind("<FocusIn>", lambda _event: self._set_status("按键可输入 A、B、C、D、Enter、F5、Ctrl+C 等。"))
 
         ttk.Label(form, text="等待").grid(row=0, column=3, sticky="w")
         ttk.Entry(form, textvariable=self.step_delay_var, width=8).grid(row=1, column=3, sticky="ew", padx=(0, 8))
@@ -329,27 +340,61 @@ class ClickMacroApp(tk.Tk):
         status = ttk.Label(frame, textvariable=self.status_var, anchor="w", style="Status.TLabel")
         status.grid(row=2, column=0, columnspan=7, sticky="ew", pady=(12, 0))
 
-    def add_or_update_point(self) -> None:
+    def add_point(self) -> None:
+        payload = self._point_form_payload()
+        if payload is None:
+            return
+
+        name, x, y = payload
+        self.macro.points.append(TargetPoint(name=name, x=x, y=y))
+        self.selected_point_id = None
+        self.point_name_var.set(f"点位 {len(self.macro.points) + 1}")
+        self._set_status(f"已新增：{name}。当前共有 {len(self.macro.points)} 个目标点。")
+        self._refresh_all()
+
+    def update_selected_point(self) -> None:
+        if not self.selected_point_id:
+            messagebox.showinfo("未选择目标点", "请先在目标点列表中选择要更新的点位。")
+            return
+
+        payload = self._point_form_payload()
+        if payload is None:
+            return
+
+        point = self._find_point(self.selected_point_id)
+        if point is None:
+            self.selected_point_id = None
+            self._refresh_all()
+            messagebox.showerror("目标点不存在", "选中的目标点已经不存在。")
+            return
+
+        name, x, y = payload
+        point.name = name
+        point.x = x
+        point.y = y
+        self._set_status(f"已更新：{name}")
+        self._refresh_all()
+
+    def clear_point_selection(self) -> None:
+        self.selected_point_id = None
+        selected = self.points_tree.selection()
+        if selected:
+            self.points_tree.selection_remove(*selected)
+        self.points_tree.focus("")
+        self.point_name_var.set(f"点位 {len(self.macro.points) + 1}")
+        self.point_x_var.set("0")
+        self.point_y_var.set("0")
+        self._set_status("已取消选择。填写坐标后可继续新增点位。")
+
+    def _point_form_payload(self) -> tuple[str, int, int] | None:
         try:
             name = self.point_name_var.get().strip() or f"点位 {len(self.macro.points) + 1}"
             x = int(self.point_x_var.get())
             y = int(self.point_y_var.get())
         except ValueError:
             messagebox.showerror("点位无效", "X 和 Y 坐标必须是整数。")
-            return
-
-        if self.selected_point_id:
-            point = self._find_point(self.selected_point_id)
-            if point is not None:
-                point.name = name
-                point.x = x
-                point.y = y
-                self._set_status(f"已更新：{name}")
-        else:
-            self.macro.points.append(TargetPoint(name=name, x=x, y=y))
-            self.point_name_var.set(f"点位 {len(self.macro.points) + 1}")
-            self._set_status(f"已添加：{name}")
-        self._refresh_all()
+            return None
+        return name, x, y
 
     def capture_point_later(self) -> None:
         if self.capture_after_id is not None:
@@ -370,7 +415,7 @@ class ClickMacroApp(tk.Tk):
         if not self.point_name_var.get().strip():
             self.point_name_var.set(f"点位 {len(self.macro.points) + 1}")
         self.capture_after_id = None
-        self.add_or_update_point()
+        self.add_point()
 
     def delete_point(self) -> None:
         if not self.selected_point_id:

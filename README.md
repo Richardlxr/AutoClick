@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 添加、编辑、删除目标点。
+- 添加、编辑、删除任意数量的目标点。
 - 3 秒倒计时捕获鼠标当前位置作为目标点。
 - 添加点击步骤：选择目标点、设置步骤前等待、执行次数、间隔。
 - 添加按键步骤：支持单个按键和组合键，例如 `Enter`、`F5`、`Ctrl+C`、`Alt+Tab`。
@@ -49,7 +49,7 @@ python app.py
 
 ## 使用流程
 
-1. 点击 `3 秒捕获`，把鼠标移动到要点击的位置，倒计时结束后会保存点位。
+1. 点击 `3 秒捕获新增`，把鼠标移动到要点击的位置，倒计时结束后会新增一个点位。
 2. 对每个目标位置重复一次。
 3. 在 `宏步骤` 里选择 `点击坐标` 或 `键盘按键`。
 4. 点击步骤选择目标点；按键步骤输入按键，例如 `Enter` 或 `Ctrl+V`。
@@ -61,7 +61,7 @@ python app.py
 
 常用按键可以直接从下拉框选择，也可以手动输入：
 
-- 字母和数字：`A`、`B`、`1`、`9`
+- 字母和数字：`A`、`B`、`C`、`D`、`1`、`9`
 - 功能键：`F1` 到 `F24`
 - 控制键：`Enter`、`Esc`、`Tab`、`Space`、`Backspace`、`Delete`
 - 方向键：`Up`、`Down`、`Left`、`Right`
@@ -94,8 +94,8 @@ ClickMacro-windows.zip
 发布 Release 时，可以推送一个版本 tag：
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 GitHub Actions 会自动构建 `ClickMacro.exe`，并把 `ClickMacro-windows.zip` 附到对应 Release 上。
