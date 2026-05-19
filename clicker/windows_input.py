@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import platform
 import time
+from dataclasses import dataclass
 from ctypes import wintypes
 
 
@@ -17,9 +18,36 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 KEYEVENTF_KEYUP = 0x0002
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
 VK_F7 = 0x76
 
 ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
+_USER32 = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenBounds:
+    left: int
+    top: int
+    width: int
+    height: int
+
+    @property
+    def right(self) -> int:
+        return self.left + self.width
+
+    @property
+    def bottom(self) -> int:
+        return self.top + self.height
+
+    def contains(self, x: int, y: int) -> bool:
+        return self.left <= x < self.right and self.top <= y < self.bottom
+
+    def describe(self) -> str:
+        return f"X {self.left} 到 {self.right - 1}，Y {self.top} 到 {self.bottom - 1}"
 
 
 class POINT(ctypes.Structure):
@@ -131,9 +159,29 @@ for index in range(10):
 
 
 def _user32() -> ctypes.WinDLL:
+    global _USER32
     if not IS_WINDOWS:
         raise RuntimeError("Windows input is only available on Windows.")
-    return ctypes.windll.user32
+    if _USER32 is None:
+        _USER32 = ctypes.WinDLL("user32", use_last_error=True)
+        _USER32.GetAsyncKeyState.argtypes = [wintypes.INT]
+        _USER32.GetAsyncKeyState.restype = wintypes.SHORT
+        _USER32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+        _USER32.GetCursorPos.restype = wintypes.BOOL
+        _USER32.GetSystemMetrics.argtypes = [wintypes.INT]
+        _USER32.GetSystemMetrics.restype = wintypes.INT
+        _USER32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+        _USER32.SendInput.restype = wintypes.UINT
+        _USER32.SetCursorPos.argtypes = [wintypes.INT, wintypes.INT]
+        _USER32.SetCursorPos.restype = wintypes.BOOL
+    return _USER32
+
+
+def _last_windows_error(action: str) -> str:
+    code = ctypes.get_last_error()
+    if code:
+        return f"{action}失败。Windows 错误码 {code}：{ctypes.FormatError(code).strip()}"
+    return f"{action}失败。Windows 没有返回更具体的错误码。"
 
 
 def make_process_dpi_aware() -> None:
@@ -149,8 +197,27 @@ def cursor_position() -> tuple[int, int]:
     user32 = _user32()
     point = POINT()
     if not user32.GetCursorPos(ctypes.byref(point)):
-        raise OSError("GetCursorPos failed.")
+        raise OSError(_last_windows_error("读取鼠标位置"))
     return int(point.x), int(point.y)
+
+
+def virtual_screen_bounds() -> ScreenBounds:
+    user32 = _user32()
+    return ScreenBounds(
+        left=int(user32.GetSystemMetrics(SM_XVIRTUALSCREEN)),
+        top=int(user32.GetSystemMetrics(SM_YVIRTUALSCREEN)),
+        width=int(user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)),
+        height=int(user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)),
+    )
+
+
+def validate_screen_point(x: int, y: int, bounds: ScreenBounds) -> None:
+    if bounds.contains(x, y):
+        return
+    raise ValueError(
+        f"目标坐标 ({x}, {y}) 不在当前屏幕范围内。当前屏幕范围：{bounds.describe()}。"
+        "请重新捕获目标点，或检查显示器连接、分辨率和缩放设置。"
+    )
 
 
 def is_f7_pressed() -> bool:
@@ -198,9 +265,18 @@ class WindowsClickBackend:
         if button not in BUTTON_FLAGS:
             raise ValueError(f"Unsupported mouse button: {button}")
 
+        x = int(x)
+        y = int(y)
+        validate_screen_point(x, y, virtual_screen_bounds())
+
         user32 = _user32()
-        if not user32.SetCursorPos(int(x), int(y)):
-            raise OSError("SetCursorPos failed.")
+        ctypes.set_last_error(0)
+        if not user32.SetCursorPos(x, y):
+            raise OSError(
+                _last_windows_error(f"移动鼠标到 ({x}, {y})")
+                + " 如果目标程序以管理员身份运行，请也用管理员身份启动自动点击器；"
+                "如果刚切换过显示器或缩放，请重新捕获目标点。"
+            )
         if self.settle_seconds:
             time.sleep(self.settle_seconds)
 
@@ -232,7 +308,7 @@ class WindowsClickBackend:
         )
         sent = user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
         if sent != 1:
-            raise OSError("SendInput failed.")
+            raise OSError(_last_windows_error("发送鼠标点击"))
 
     def _send_key(self, key_code: int, key_up: bool) -> None:
         user32 = _user32()
@@ -243,4 +319,4 @@ class WindowsClickBackend:
         )
         sent = user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
         if sent != 1:
-            raise OSError("SendInput failed.")
+            raise OSError(_last_windows_error("发送键盘按键"))
