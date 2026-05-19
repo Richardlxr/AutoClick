@@ -7,4 +7,8 @@ __pycache__/
 venv/
 build/
 dist/
+package/
 *.egg-info/
+.venv-build/
+ClickMacro.spec
+ClickMacro-windows.zip

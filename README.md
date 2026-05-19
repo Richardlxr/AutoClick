@@ -15,7 +15,16 @@
 
 ## 运行
 
-需要 Windows + Python 3.10 或更新版本。
+推荐下载打包好的 Windows 程序：
+
+1. 打开 GitHub 仓库的 `Actions` 页面。
+2. 选择 `Build Windows App`。
+3. 下载最新一次运行里的 `ClickMacro-windows` artifact。
+4. 解压后双击 `ClickMacro.exe`。
+
+如果下载的是 Release 版本，直接下载 `ClickMacro-windows.zip`，解压后双击 `ClickMacro.exe`。
+
+也可以从源码运行，需要 Windows + Python 3.10 或更新版本。
 
 双击运行：
 
@@ -54,3 +63,26 @@ python -m unittest discover -s tests
 ```
 
 在 macOS/Linux 上运行时，程序会进入 dry-run 模式，不会发送真实点击；真实点击只在 Windows 上启用。
+
+## 打包 Windows 程序
+
+本地打包需要 Windows + Python 3.10 或更新版本：
+
+```text
+build_windows.bat
+```
+
+脚本会生成：
+
+```text
+ClickMacro-windows.zip
+```
+
+发布 Release 时，可以推送一个版本 tag：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions 会自动构建 `ClickMacro.exe`，并把 `ClickMacro-windows.zip` 附到对应 Release 上。
